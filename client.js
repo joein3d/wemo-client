@@ -26,6 +26,7 @@ var WemoClient = module.exports = function(config, log) {
   this.callbackURL = config.callbackURL;
   this.device = config;
   this.error = undefined;
+  this.shouldEmitErrors = false;
 
   // Create map of services
   config.serviceList.service.forEach(function(service) {
@@ -327,21 +328,24 @@ WemoClient.prototype._subscribe = function(serviceType) {
     debug('Subscription error: %s - Device: %s, Service: %s', err.code, this.UDN, serviceType);
     this.subscriptions[serviceType] = null;
     this.error = err.code;
-    // this.emit('error', err);
-    // We can't pass back errors to the calling module so we'll do what we can to try
-    // and gracefully recover from HTTP errors.
-    // ECONNREFUSED suggests that the port number may have changed
-    // EHOSTUNREACH suggests the device has gone (switched off maybe)
-    // ETIMEDOUT    seems to be recoverable - just lost it for a bit, we'll retry.
-    var timeout = 5; // seconds before we retry
-    debug('HTTP Error (%s) occurred (re)subscribing to Wemo Device (%s - %s:%s), retrying.',
-      err.code, self.device.friendlyName, self.device.host, self.device.port, self.UDN);
-    if (err.code === 'ECONNREFUSED') { // try the alternate port that wemo tends to use.
-      (self.port === '49154') ? self.port = '49153' : self.port = '49154' ;
-      debug('Trying port: %s', self.port);
-      timeout = 1; // may as well try the new port sooner than later
+    if (this.shouldEmitErrors) {
+      this.emit('error', err);
+    } else {
+      // We can't pass back errors to the calling module so we'll do what we can to try
+      // and gracefully recover from HTTP errors.
+      // ECONNREFUSED suggests that the port number may have changed
+      // EHOSTUNREACH suggests the device has gone (switched off maybe)
+      // ETIMEDOUT    seems to be recoverable - just lost it for a bit, we'll retry.
+      var timeout = 5; // seconds before we retry
+      debug('HTTP Error (%s) occurred (re)subscribing to Wemo Device (%s - %s:%s), retrying.',
+        err.code, self.device.friendlyName, self.device.host, self.device.port, self.UDN);
+      if (err.code === 'ECONNREFUSED') { // try the alternate port that wemo tends to use.
+        (self.port === '49154') ? self.port = '49153' : self.port = '49154' ;
+        debug('Trying port: %s', self.port);
+        timeout = 1; // may as well try the new port sooner than later
+      }
+      setTimeout(this._subscribe.bind(this), timeout * 1000, serviceType);
     }
-    setTimeout(this._subscribe.bind(this), timeout * 1000, serviceType);
   }.bind(this));
 
   req.end();
