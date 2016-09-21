@@ -334,11 +334,11 @@ WemoClient.prototype._subscribe = function(serviceType) {
     // EHOSTUNREACH suggests the device has gone (switched off maybe)
     // ETIMEDOUT    seems to be recoverable - just lost it for a bit, we'll retry.
     var timeout = 5; // seconds before we retry
-    self.log('HTTP Error (%s) occurred (re)subscribing to Wemo Device (%s - %s:%s), retrying.',
+    debug('HTTP Error (%s) occurred (re)subscribing to Wemo Device (%s - %s:%s), retrying.',
       err.code, self.device.friendlyName, self.device.host, self.device.port, self.UDN);
     if (err.code === 'ECONNREFUSED') { // try the alternate port that wemo tends to use.
       (self.port === '49154') ? self.port = '49153' : self.port = '49154' ;
-      self.log('Trying port: %s', self.port);
+      debug('Trying port: %s', self.port);
       timeout = 1; // may as well try the new port sooner than later
     }
     setTimeout(this._subscribe.bind(this), timeout * 1000, serviceType);
