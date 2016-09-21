@@ -16,7 +16,7 @@ function mapCapabilities(capabilityIds, capabilityValues) {
   return result;
 }
 
-var WemoClient = module.exports = function(config, log) {
+var WemoClient = module.exports = function(config) {
   EventEmitter.call(this);
   this.host = config.host;
   this.port = config.port;
