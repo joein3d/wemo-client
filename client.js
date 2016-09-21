@@ -75,10 +75,6 @@ WemoClient.request = function(options, data, cb) {
       cb(err);
     });
   });
-  req.setTimeout(3000, function() {  // 3 seconds to respond so we're inside the homekit wait
-    req.abort();
-    debug('Error on http.request.req: Timed out!');
-  });
   req.on('error', function(err) {
     debug('Error on http.request.req:', err);
     cb(err);
@@ -117,7 +113,13 @@ WemoClient.prototype.soapAction = function(serviceType, action, body, cb) {
   };
 
   WemoClient.request(options, payload, function(err, response) {
-    if (err) return cb(err);
+    if (err) {
+      this.error = err.code;
+      if (this.shouldEmitErrors) {
+        this.emit('error', err);
+      }
+      return cb(err);
+    }
 
     debug('%s Response: ', action, response);
     cb(null, response && response['s:Envelope']['s:Body']['u:' + action + 'Response']);
@@ -314,8 +316,6 @@ WemoClient.prototype._subscribe = function(serviceType) {
     debug('Renewing subscription - Device: %s, Service: %s', this.UDN, serviceType);
     options.headers.SID = this.subscriptions[serviceType];
   }
-
-  var self = this;
 
   var req = http.request(options, function(res) {
     if (res.headers.sid) {
