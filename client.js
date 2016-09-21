@@ -26,7 +26,7 @@ var WemoClient = module.exports = function(config, log) {
   this.callbackURL = config.callbackURL;
   this.device = config;
   this.error = undefined;
-  this.shouldEmitErrors = false;
+  this.shouldEmitErrors = true;
 
   // Create map of services
   config.serviceList.service.forEach(function(service) {
