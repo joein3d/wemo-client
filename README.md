@@ -3,9 +3,7 @@
 Low-level client library for controlling recent Wemo devices including Bulbs. Supports event subscriptions to get live updates from devices.
 
 [![Build Status](https://travis-ci.org/timonreinhard/wemo-client.svg?branch=master)](https://travis-ci.org/timonreinhard/wemo-client)
-[![Code Climate](https://codeclimate.com/github/timonreinhard/wemo-client/badges/gpa.svg)](https://codeclimate.com/github/timonreinhard/wemo-client)
-[![Test Coverage](https://codeclimate.com/github/timonreinhard/wemo-client/badges/coverage.svg)](https://codeclimate.com/github/timonreinhard/wemo-client/coverage)
-[![Npm](https://img.shields.io/npm/v/wemo-client.svg)](http://npmjs.com/package/wemo-client)
+[![codecov](https://codecov.io/gh/timonreinhard/wemo-client/branch/master/graph/badge.svg)](https://codecov.io/gh/timonreinhard/wemo-client)
 
 ## Supported Devices
 
@@ -52,6 +50,23 @@ wemo.discover(function(deviceInfo) {
 
 ### Wemo
 
+#### new Wemo([opts])
+
+Create the Wemo instance. An optional object containing options can be specified. Available options include `port` which will provide a port to bind to for listening to UPnP events (the default is to listen on any available randomly selected port.) Discovery options for `node-ssdp` can also be specified as `discover_opts`.
+
+Example of options:
+
+```
+{
+  port: 1234,
+  discover_opts: {
+    unicastBindPort: 1235
+  }
+}
+```
+
+* **Object** *options* Options
+
 #### DEVICE_TYPE
 
 Static map of supported models and device types.
@@ -61,13 +76,17 @@ Static map of supported models and device types.
 * Motion
 * Maker
 * Insight
-* LightSwith
+* LightSwitch
 
 #### discover(cb)
 
 Discover Wemo devices via UPnP. A `deviceInfo` will be passed to `cb` that can be used to get a client for the device found.
 
 * **Callback** *cb* Callback called with for every single device found.
+
+Due to the nature of UPnP it may be required to call this method multiple times to discover actually all devices connected to the local network.
+
+The callback will only be called for newly found devices (those that have not been detected by a previous call to `discover`). Except for devices that have been lost in an error state as those will reappear again when coming back online (e.g. because their IP/port have changed).
 
 #### load(setupUrl, cb)
 
@@ -121,6 +140,14 @@ Wemo Insight Switch sent new power consumption data.
 * **String** *instantPower* Current power consumption in mW
 * **Object** *data* Aggregated usage data
 
+#### Event: error (err)
+
+An error occured while handling the event subscriptions or calling a device action.
+When `err.code` is one of `ECONNREFUSED`, `EHOSTUNREACH` or `ETIMEDOUT` the device
+likely went offline.
+
+* **Object** *err*
+
 #### getEndDevices(cb)
 
 Get bulbs connected to a Wemo Bridge. An `endDeviceInfo` for every device paired is passed to the callback in an array, e.g.:
@@ -156,6 +183,12 @@ Turn the device on or off. Will also cause a `binaryState` event to be triggered
 
 * **String** *value* `1` = on, `0` = off
 * **Callback** *cb* cb(err, response)
+
+#### getAttributes(cb)
+
+Get the device attributes of a Wemo Maker.
+
+* **Callback** *cb* cb(err, attributes)
 
 #### getDeviceStatus(deviceId, cb)
 
@@ -201,6 +234,14 @@ Convenience function for setting the color of a RGB light.
 * **Number** *green* 0-255
 * **Number** *blue* 0-255
 * **Callback** *cb* cb(err, response)
+
+#### getInsightParams(cb)
+
+Get power consumption data for a Wemo Insight Switch
+
+* **Callback** *cb* cb(err, binaryState, instantPower, data)
+
+The callback is passed the `binaryState`, `instantPower` and `data` (see [Event: InsightParams](#event-insightparams-binarystate-instantpower-data))
 
 ## Debugging
 

@@ -1,8 +1,10 @@
 var util = require('util');
 var http = require('http');
 var xml2js = require('xml2js');
+var entities = require('entities');
 var EventEmitter = require('events').EventEmitter;
 var debug = require('debug')('wemo-client');
+var xmlbuilder = require('xmlbuilder');
 
 function mapCapabilities(capabilityIds, capabilityValues) {
   var ids = capabilityIds.split(',');
@@ -16,7 +18,6 @@ function mapCapabilities(capabilityIds, capabilityValues) {
 
 var WemoClient = module.exports = function(config, log) {
   EventEmitter.call(this);
-  this.log = log || debug;
   this.host = config.host;
   this.port = config.port;
   this.deviceType = config.deviceType;
@@ -24,6 +25,7 @@ var WemoClient = module.exports = function(config, log) {
   this.subscriptions = {};
   this.callbackURL = config.callbackURL;
   this.device = config;
+  this.error = undefined;
 
   // Create map of services
   config.serviceList.service.forEach(function(service) {
@@ -61,7 +63,11 @@ WemoClient.request = function(options, data, cb) {
       body += chunk;
     });
     res.on('end', function() {
-      xml2js.parseString(body, { explicitArray: false }, cb);
+      if (res.statusCode === 200) {
+        xml2js.parseString(body, { explicitArray: false }, cb);
+      } else {
+        cb(new Error('HTTP ' + res.statusCode + ': ' + body));
+      }
     });
     res.on('error', function(err) {
       debug('Error on http.request.res:', err);
@@ -85,9 +91,18 @@ WemoClient.request = function(options, data, cb) {
 WemoClient.prototype.soapAction = function(serviceType, action, body, cb) {
   cb = cb || function() {};
 
-  var payload = '<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body>';
-  payload += util.format('<u:%s xmlns:u="%s">%s</u:%s>', action, serviceType, body, action);
-  payload += '</s:Body></s:Envelope>';
+  var xml = xmlbuilder.create('s:Envelope', {
+    version: '1.0',
+    encoding: 'utf-8',
+    allowEmpty: true
+  })
+  .att('xmlns:s', 'http://schemas.xmlsoap.org/soap/envelope/')
+  .att('s:encodingStyle', 'http://schemas.xmlsoap.org/soap/encoding/')
+  .ele('s:Body')
+  .ele('u:' + action)
+  .att('xmlns:u', serviceType);
+
+  var payload = (body ? xml.ele(body) : xml).end();
 
   var options = {
     host: this.host,
@@ -102,9 +117,10 @@ WemoClient.prototype.soapAction = function(serviceType, action, body, cb) {
 
   WemoClient.request(options, payload, function(err, response) {
     if (err) return cb(err);
+
     debug('%s Response: ', action, response);
     cb(null, response && response['s:Envelope']['s:Body']['u:' + action + 'Response']);
-  });
+  }.bind(this));
 };
 
 WemoClient.prototype.getEndDevices = function(cb) {
@@ -158,17 +174,27 @@ WemoClient.prototype.getEndDevices = function(cb) {
     });
   };
 
-  var body = '<DevUDN>%s</DevUDN><ReqListType>PAIRED_LIST</ReqListType>';
-  this.soapAction('urn:Belkin:service:bridge:1', 'GetEndDevices', util.format(body, this.UDN), parseResponse);
+  this.soapAction('urn:Belkin:service:bridge:1', 'GetEndDevices', {
+    DevUDN: this.UDN,
+    ReqListType: 'PAIRED_LIST'
+  }, parseResponse);
 };
 WemoClient.prototype.setDeviceStatus = function(deviceId, capability, value, cb) {
-  var isGroupAction = (deviceId.length === 10) ? 'YES' : 'NO';
-  var body = [
-    '<DeviceStatusList>',
-    '&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;&lt;DeviceStatus&gt;&lt;IsGroupAction&gt;%s&lt;/IsGroupAction&gt;&lt;DeviceID available=&quot;YES&quot;&gt;%s&lt;/DeviceID&gt;&lt;CapabilityID&gt;%s&lt;/CapabilityID&gt;&lt;CapabilityValue&gt;%s&lt;/CapabilityValue&gt;&lt;/DeviceStatus&gt;',
-    '</DeviceStatusList>'
-  ].join('\n');
-  this.soapAction('urn:Belkin:service:bridge:1', 'SetDeviceStatus', util.format(body, isGroupAction, deviceId, capability, value), cb);
+  var deviceStatusList = xmlbuilder.create('DeviceStatus', {
+    version: '1.0',
+    encoding: 'utf-8'
+  }).ele({
+    IsGroupAction: (deviceId.length === 10) ? 'YES' : 'NO',
+    DeviceID: deviceId,
+    CapabilityID: capability,
+    CapabilityValue: value
+  }).end();
+
+  this.soapAction('urn:Belkin:service:bridge:1', 'SetDeviceStatus', {
+    DeviceStatusList: {
+      '#text': deviceStatusList
+    }
+  }, cb);
 };
 
 WemoClient.prototype.getDeviceStatus = function(deviceId, cb) {
@@ -181,8 +207,10 @@ WemoClient.prototype.getDeviceStatus = function(deviceId, cb) {
       cb(null, capabilities);
     });
   };
-  var body = '<DeviceIDs>%s</DeviceIDs>';
-  this.soapAction('urn:Belkin:service:bridge:1', 'GetDeviceStatus', util.format(body, deviceId), parseResponse);
+
+  this.soapAction('urn:Belkin:service:bridge:1', 'GetDeviceStatus', {
+    DeviceIDs: deviceId
+  }, parseResponse);
 };
 
 WemoClient.prototype.setLightColor = function(deviceId, red, green, blue, cb) {
@@ -191,8 +219,9 @@ WemoClient.prototype.setLightColor = function(deviceId, red, green, blue, cb) {
 };
 
 WemoClient.prototype.setBinaryState = function(value, cb) {
-  var body = '<BinaryState>%s</BinaryState>';
-  this.soapAction('urn:Belkin:service:basicevent:1', 'SetBinaryState', util.format(body, value), cb);
+  this.soapAction('urn:Belkin:service:basicevent:1', 'SetBinaryState', {
+    BinaryState: value
+  }, cb);
 };
 
 WemoClient.prototype.getBinaryState = function(cb) {
@@ -200,6 +229,46 @@ WemoClient.prototype.getBinaryState = function(cb) {
     if (err) return cb(err);
     cb(null, data.BinaryState);
   });
+};
+
+WemoClient.prototype.getAttributes = function(cb) {
+  this.soapAction('urn:Belkin:service:deviceevent:1', 'GetAttributes', null, function(err, data) {
+    if (err) return cb(err);
+    var xml = '<attributeList>' + entities.decodeXML(data.attributeList) + '</attributeList>';
+    xml2js.parseString(xml, { explicitArray: false }, function(err, result) {
+      if (err) return cb(err);
+      var attributes = {};
+      for (var key in result.attributeList.attribute) {
+        var attribute = result.attributeList.attribute[key];
+        attributes[attribute.name] = attribute.value;
+      }
+      cb(null, attributes);
+    });
+  });
+};
+
+WemoClient.prototype.getInsightParams = function(cb) {
+  this.soapAction('urn:Belkin:service:insight:1', 'GetInsightParams', null, function(err, data) {
+    if (err) return cb(err);
+
+    var params = this._parseInsightParams(data.InsightParams);
+    cb(null, params.binaryState, params.instantPower, params.insightParams);
+  }.bind(this));
+};
+
+WemoClient.prototype._parseInsightParams = function(paramsStr) {
+  var params = paramsStr.split('|');
+
+  return {
+    binaryState: params[0],
+    instantPower: params[7],
+    insightParams: {
+      ONSince: params[1],
+      OnFor: params[2],
+      TodayONTime: params[3],
+      TodayConsumed: params[8]  // power consumer today (mW per minute)
+    }
+  };
 };
 
 WemoClient.prototype._onListenerAdded = function(eventName) {
@@ -219,7 +288,7 @@ WemoClient.prototype._subscribe = function(serviceType) {
     return;
   }
   if (this.subscriptions[serviceType] && this.subscriptions[serviceType] === 'PENDING') {
-    debug('PENDING - returning');
+    debug('subscription still pending');
     return;
   }
 
@@ -255,6 +324,10 @@ WemoClient.prototype._subscribe = function(serviceType) {
   }.bind(this));
 
   req.on('error', function(err) {
+    debug('Subscription error: %s - Device: %s, Service: %s', err.code, this.UDN, serviceType);
+    this.subscriptions[serviceType] = null;
+    this.error = err.code;
+    // this.emit('error', err);
     // We can't pass back errors to the calling module so we'll do what we can to try
     // and gracefully recover from HTTP errors.
     // ECONNREFUSED suggests that the port number may have changed
@@ -268,7 +341,6 @@ WemoClient.prototype._subscribe = function(serviceType) {
       self.log('Trying port: %s', self.port);
       timeout = 1; // may as well try the new port sooner than later
     }
-    this.subscriptions[serviceType] = null; // reset expectations about the presence of this device
     setTimeout(this._subscribe.bind(this), timeout * 1000, serviceType);
   }.bind(this));
 
@@ -293,27 +365,23 @@ WemoClient.prototype.handleCallback = function(body) {
       });
     },
     InsightParams: function(data) {
-      var params = data.split('|');
-      var insightParams = {
-        ONSince: params[1],
-        OnFor: params[2],
-        TodayONTime: params[3]
-      };
-      self.emit('insightParams',
-        params[0], // binary state
-        params[7], // instant power
-        insightParams
-      );
-    },
+      var params = this._parseInsightParams(data);
+      self.emit('insightParams', params.binaryState, params.instantPower, params.insightParams);
+    }.bind(this),
     attributeList: function(data) {
-      xml2js.parseString(data, { explicitArray: false }, function(err, xml) {
+      var xml = '<attributeList>' + entities.decodeXML(data) + '</attributeList>';
+      xml2js.parseString(xml, { explicitArray: true }, function(err, result) {
         if (!err) {
-          self.emit('attributeList',
-            xml.attribute.name,
-            xml.attribute.value,
-            xml.attribute.prevalue,
-            xml.attribute.ts
-          );
+          // In order to keep the existing event signature this
+          // triggers an event for every attribute changed.
+          result.attributeList.attribute.forEach(function(attribute) {
+            self.emit('attributeList',
+              attribute.name[0],
+              attribute.value[0],
+              attribute.prevalue[0],
+              attribute.ts[0]
+            );
+          });
         }
       });
     }

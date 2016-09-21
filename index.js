@@ -6,9 +6,13 @@ var debug = require('debug')('wemo-client');
 
 var WemoClient = require('./client');
 
-var Wemo = module.exports = function() {
+var Wemo = module.exports = function(opts) {
+  opts = opts || {};
+  this._port = opts.port || 0;
+
   this._clients = {};
   this._listen();
+  this._ssdpClient = new SSDPClient(opts.discover_opts || {});
 };
 
 Wemo.DEVICE_TYPE = {
@@ -30,14 +34,15 @@ Wemo.prototype.load = function(setupUrl, cb) {
     path: location.path,
     method: 'GET'
   }, function(err, json) {
-    if (!err) {
+    if (!err && json) {
       var device = json.root.device;
       device.host = location.hostname;
       device.port = location.port;
       device.callbackURL = self.getCallbackURL();
 
       // Return only matching devices and return them only once!
-      if (!self._clients[device.UDN] && device.deviceType.match(/^urn:Belkin:device/)) {
+      if (!device.deviceType.match(/^urn:Belkin:device/)) return;
+      if (!self._clients[device.UDN] || self._clients[device.UDN].error) {
         debug('Found device: %j', json);
         if (cb) {
           cb.call(self, device);
@@ -53,14 +58,14 @@ Wemo.prototype.discover = function(cb) {
     self.load(msg.LOCATION, cb);
   };
 
-  var ssdpClient = new SSDPClient();
-  ssdpClient.on('response', handleResponse);
-  ssdpClient.search('urn:Belkin:service:basicevent:1');
+  this._ssdpClient.removeAllListeners('response');
+  this._ssdpClient.on('response', handleResponse);
+  this._ssdpClient.search('urn:Belkin:service:basicevent:1');
 };
 
 Wemo.prototype._listen = function() {
   this._server = http.createServer(this._handleRequest.bind(this));
-  this._server.listen(0, function(err) {
+  this._server.listen(this._port, function(err) {
     if (err) {
       throw err;
     }
@@ -111,8 +116,8 @@ Wemo.prototype.getCallbackURL = function() {
   return this._callbackURL;
 };
 
-Wemo.prototype.client = function(device, log) {
-  if (this._clients[device.UDN]) {
+Wemo.prototype.client = function(device) {
+  if (this._clients[device.UDN] && !this._clients[device.UDN].error) {
     return this._clients[device.UDN];
   }
 
