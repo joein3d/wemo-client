@@ -121,6 +121,6 @@ Wemo.prototype.client = function(device) {
     return this._clients[device.UDN];
   }
 
-  var client = this._clients[device.UDN] = new WemoClient(device, log);
+  var client = this._clients[device.UDN] = new WemoClient(device);
   return client;
 };
